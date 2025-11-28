@@ -76,6 +76,7 @@ publisher:
 # ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
 menu:
   Home: index.html
+  Diagrams: diagrams.html
   Artifacts: artifacts.html
 
 # ╭───────────────────────────Less Common Implementation Guide Properties──────────────────────────╮
