@@ -3,7 +3,6 @@ CodeSystem: LocalLabCodesCS
 Id: local-lab-codes-cs
 Title: "Local Laboratory Codes"
 Description: "Local laboratory observation codes not found in LOINC"
-* ^url = "http://example.org/fhir/CodeSystem/local-lab-codes-cs"
 * ^status = #active
 * ^experimental = true
 * ^caseSensitive = true
@@ -17,7 +16,6 @@ ValueSet: CombinedLabCodesVS
 Id: combined-lab-codes-vs
 Title: "Combined Laboratory Codes"
 Description: "Laboratory codes from LOINC and local CodeSystem"
-* ^url = "http://example.org/fhir/ValueSet/combined-lab-codes-vs"
 * ^status = #active
 * ^experimental = true
 
@@ -35,7 +33,6 @@ ValueSet: CombinedLabCodesVS2
 Id: combined-lab-codes-vs-2
 Title: "Combined Laboratory Codes (Pattern 2)"
 Description: "Laboratory codes using include codes from system for both"
-* ^url = "http://example.org/fhir/ValueSet/combined-lab-codes-vs-2"
 * ^status = #active
 * ^experimental = true
 
