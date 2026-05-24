@@ -1,86 +1,34 @@
-# IG Publisher bug: ConceptMap target-VS validation rejects explicit `concept` includes
+# ConceptMap target-VS check rejects codes that are in the VS
 
-## Environment
+Hit this on publisher 2.2.8 (and 2.2.7 before I updated), FHIR R5, sushi 3.19.0.
 
-- **Publisher**: FHIR IG Publisher Version 2.2.7 (Git# 46f94953d4dc), built 2026-04-23
-- **FHIR**: R5 (5.0.0)
-- **SUSHI**: 3.19.0
+I have a ConceptMap with `targetScopeCanonical` pointing at a local VS that just enumerates a few CVX codes by concept. Every single target element fails validation with `CONCEPTMAP_GROUP_TARGET_CODE_INVALID_VS`, even though those exact codes are the only thing in the VS.
 
-## Symptom
-
-For a ConceptMap whose `targetScopeCanonical` points to a local ValueSet that includes target codes via explicit `concept` enumeration, every target code emits:
+Run `./_genonce.sh` and look at `output/qa.txt`:
 
 ```
-ERROR CONCEPTMAP_GROUP_TARGET_CODE_INVALID_VS
-"The target code '<code>' is not valid in the value set <TargetVS>|<version>"
+ERROR ConceptMap/repro-cm: ...target[0].code: The target code '01'  is not valid in the value set https://vadimperetok.in/fhir/ValueSet/target-vs|0.1.0
+ERROR ConceptMap/repro-cm: ...target[0].code: The target code '19'  is not valid ...
+ERROR ConceptMap/repro-cm: ...target[0].code: The target code '113' is not valid ...
 ```
 
-The publisher does **not** query the tx server for this check (this build's `qa-tx.html` shows zero `validate-code` calls), so the misjudgement is entirely internal: the publisher's local VS expander does not honour the explicit `concept` lists when validating ConceptMap targets.
-
-## Reproduction
-
-```sh
-./_genonce.sh
-```
-
-Then look at `output/qa.txt`. Expect:
-
-```
-ERROR: ConceptMap/repro-cm: ConceptMap.group[0].element[0].target[0].code: The target code '01' is not valid in the value set https://vadimperetok.in/fhir/ValueSet/target-vs|0.1.0
-ERROR: ConceptMap/repro-cm: ConceptMap.group[0].element[1].target[0].code: The target code '19' is not valid in the value set https://vadimperetok.in/fhir/ValueSet/target-vs|0.1.0
-ERROR: ConceptMap/repro-cm: ConceptMap.group[0].element[2].target[0].code: The target code '113' is not valid in the value set https://vadimperetok.in/fhir/ValueSet/target-vs|0.1.0
-```
-
-## Why this is a bug
-
-`TargetVS` (`input/fsh/repro.fsh`) is:
-
-```fsh
-ValueSet: TargetVS
-* ^url = "https://vadimperetok.in/fhir/ValueSet/target-vs"
-* $cvx#01  "diphtheria, tetanus toxoids and pertussis vaccine"
-* $cvx#19  "Bacillus Calmette-Guerin vaccine"
-* $cvx#113 "tetanus and diphtheria toxoids, adsorbed, preservative free, for adult use ..."
-```
-
-generated JSON (verbatim from `fsh-generated/resources/ValueSet-target-vs.json`):
+The VS those codes are supposedly missing from:
 
 ```json
-{
-  "compose": {
-    "include": [{
-      "system": "http://hl7.org/fhir/sid/cvx",
-      "concept": [
-        {"code": "01", "display": "..."},
-        {"code": "19", "display": "..."},
-        {"code": "113","display": "..."}
-      ]
-    }]
-  }
-}
+"include": [{
+  "system": "http://hl7.org/fhir/sid/cvx",
+  "concept": [{"code":"01",...},{"code":"19",...},{"code":"113",...}]
+}]
 ```
 
-The expansion of this VS, per FHIR semantics, is exactly these three codes. tx.fhir.org agrees: `ValueSet/$expand` returns them, and `ValueSet/$validate-code` with each code + this VS inline returns `result: true`. Despite this, the publisher's `CONCEPTMAP_GROUP_TARGET_CODE_INVALID_VS` check rejects every one of them.
+`output/qa-tx.html` shows zero `validate-code` calls for this VS, so the publisher isn't even asking tx; the internal expander is just returning empty for an `include` that has a `concept` list on it.
 
-## Other VS shapes tested (all reproduce the bug)
+I first ran into this in a larger IG (uzinfocom-org/digital-health-ig, 52 ConceptMap elements, all failing the same way). Tried three shapes of the target VS - none worked:
 
-In the originating IG (Uzbekistan digital-health-ig, `ConceptMap/dmed-vaccine-to-cvx-cm`, 52 target elements), we tried three `TargetVS.compose.include` shapes - all 52 errors persisted:
+- `* include codes from system $cvx` (broad)
+- `* $cvx#01 "..."` etc. (this repro)
+- `* include codes from system $cvx where vaccine-status = #Active` × {Active, Inactive, Pending, Never-Active, Non-US}
 
-1. Broad `* include codes from system $cvx`
-2. Explicit concepts: `* $cvx#01 "..."` etc. (this repro)
-3. Filter: `* include codes from system $cvx where vaccine-status = #Active` × {Active, Inactive, Pending, Never-Active, Non-US}
+In the broad and filter cases the publisher *did* hit tx, tx returned `result:true` for every code, and the publisher still emitted the error. So the check isn't trusting tx either.
 
-In the broad and filter shapes the publisher DID issue `validate-code` calls to tx.fhir.org and tx returned `result: true` for each of those 52 codes - the publisher emitted the error anyway. So the internal check is not consulting / not trusting the tx response either.
-
-## Expected behaviour
-
-Either:
-
-- The `CONCEPTMAP_GROUP_TARGET_CODE_INVALID_VS` check uses the same VS expansion code path as `ValueSet/$validate-code`, OR
-- A `result:true` from the configured tx server is treated as authoritative.
-
-Currently neither happens, and any ConceptMap that maps to inactive / non-US / post-snapshot CVX codes - which is most real-world non-US vaccination IGs - accumulates one false-positive ERROR per target element.
-
-## Original context
-
-Discovered while fixing the Uzbekistan digital health IG (`digital-health-ig`), `ConceptMap/dmed-vaccine-to-cvx-cm`. 52 errors of this kind blocked CI. We cycled through all three VS shapes above before isolating the publisher as the source.
+I'd expect this check to either use the same expansion as `ValueSet/$validate-code`, or just believe a `result:true` from the configured tx server.
