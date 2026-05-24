@@ -1,2 +1,1 @@
-Alias: $sct = http://snomed.info/sct
-Alias: $sct-vs = http://snomed.info/sct?fhir_vs
+Alias: $cvx = http://hl7.org/fhir/sid/cvx
